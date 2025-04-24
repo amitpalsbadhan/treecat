@@ -1,0 +1,14 @@
+pkgbase = treecat
+pkgname = treecat
+pkgver = 1.0.1
+pkgrel = 1
+pkgdesc = Cat files or directory trees recursively wrapped in Markdown code blocks
+url = https://github.com/amitpalsbadhan/treecat
+arch = any
+deps = bash
+deps = coreutils
+deps = findutils
+license = MIT
+source = treecat.sh::https://raw.githubusercontent.com/amitpalsbadhan/treecat/v1.0.1/treecat.sh
+md5sums = SKIP
+
