@@ -9,8 +9,10 @@ license=(MIT)
 depends=(bash coreutils findutils)
 source=(
   "treecat::https://raw.githubusercontent.com/amitpalsbadhan/treecat/v${pkgver}/treecat"
+  "LICENSE"
+  "README.md"
 )
-sha256sums=('SKIP')  # replace with actual checksum if desired
+sha256sums=('SKIP' 'SKIP' 'SKIP')  # replace with actual checksum if desired
 
 package() {
   install -Dm755 "treecat"               "$pkgdir/usr/bin/treecat"
