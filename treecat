@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# treecat — cat files or directory trees in code blocks (Markdown, plain, or JSON).
+#
+# Usage:
+#   treecat [options] [FILE|DIR]...
+#   treecat                   # same as treecat . (non-recursive)
+#   treecat -r src/           # recurse through src/
+#   treecat -e '*.md' '*.txt' dir/  # exclude multiple patterns
+#   treecat -I '*.sh' '*.c' -r -m plain .
+#
+set -euo pipefail
+IFS=$'\n\t'
+
+VERSION="1.0.0"
+
+usage() {
+  cat <<EOF
+Usage: treecat [options] [FILE|DIR]...
+
+Options:
+  -h, --help            Show this help and exit
+  -v, --version         Show version and exit
+  -r, --recursive       Recurse into directories (default: non-recursive)
+  -L, --follow-symlinks Follow symlinks when recursing
+  -e, --exclude PAT...  Exclude files matching PAT (glob); multiple args allowed
+  -I, --include PAT...  Include only files matching PAT (glob); multiple args allowed
+  -d, --max-depth N     Descend at most N directory levels (overrides -r default)
+  -m, --mode MODE       Output mode: markdown (default), plain, or json
+EOF
+}
+
+# Initialize
+declare -a exclude=() include=()
+declare -a targets=()
+recursive=false
+follow_symlinks=false
+maxdepth=""
+mode="markdown"
+
+# Parse options
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;  
+    -v|--version) echo "$VERSION"; exit 0 ;;  
+    -r|--recursive) recursive=true; shift ;;  
+    -L|--follow-symlinks) follow_symlinks=true; shift ;;  
+    -e|--exclude)
+      shift
+      while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
+        exclude+=("$1"); shift
+      done
+      ;;
+    -I|--include)
+      shift
+      while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
+        include+=("$1"); shift
+      done
+      ;;
+    -d|--max-depth)
+      maxdepth="$2"; shift 2
+      ;;
+    -m|--mode)
+      mode="$2"; shift 2
+      ;;
+    --) shift; break ;;  
+    -* )
+      printf "treecat: unknown option '%s'\n" "$1" >&2; usage; exit 1
+      ;;
+    *)
+      # first non-option arg marks beginning of targets
+      break
+      ;;
+  esac
+done
+
+# Collect targets (default to .)
+if [[ $# -gt 0 ]]; then
+  targets=("${@}")
+else
+  targets=(".")
+fi
+
+# If not recursive and no explicit maxdepth, set maxdepth=1
+if [[ "$recursive" != true && -z "$maxdepth" ]]; then
+  maxdepth=1
+fi
+
+# Enable globbing of hidden files
+shopt -s nullglob dotglob
+
+# Helper: output a single file according to mode
+process_file() {
+  local file="$1"
+  local rel="${file#./}"
+  case "$mode" in
+    markdown)
+      echo "File Name: $rel:"
+      echo '```'
+      if grep -Iq . "$file"; then
+        cat "$file"
+      else
+        echo "(binary file skipped)"
+      fi
+      echo '```'
+      echo
+      ;;
+    plain)
+      echo "== $rel =="
+      if grep -Iq . "$file"; then
+        cat "$file"
+      else
+        echo "(binary file skipped)"
+      fi
+      echo
+      ;;
+    json)
+      local content
+      content=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$file" | awk '{printf "%s\\n", \$0}')
+      printf '{"path":"%s","content":"%s"}\n' "$rel" "$content"
+      ;;
+    *)
+      printf "treecat: invalid mode '%s'\n" "$mode" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# Main: iterate targets
+for target in "${targets[@]}"; do
+  if [[ -f "$target" || -L "$target" ]]; then
+    process_file "$target"
+
+  elif [[ -d "$target" ]]; then
+    # Build find command with correct option order
+    cmd=(find "$target")
+    $follow_symlinks && cmd+=( -L )
+    [[ -n "$maxdepth" ]] && cmd+=( -maxdepth "$maxdepth" )
+    cmd+=( -type f )
+
+    # Exclude globs
+    for pat in "${exclude[@]}"; do
+      cmd+=( ! -path "*${pat}*" )
+    done
+
+    # Include globs
+    if (( ${#include[@]} > 0 )); then
+      name_tests=()
+      for pat in "${include[@]}"; do
+        name_tests+=( -name "$pat" -o )
+      done
+      unset 'name_tests[${#name_tests[@]}-1]'
+      cmd+=( \( "${name_tests[@]}" \) )
+    fi
+
+    cmd+=( -print0 )
+
+    # Execute find
+    while IFS= read -r -d '' file; do
+      process_file "$file"
+    done < <("${cmd[@]}")
+
+  else
+    printf "treecat: skipping non-file/non-dir %s\n" "$target" >&2
+  fi
+done
+
